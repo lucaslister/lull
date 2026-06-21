@@ -172,44 +172,86 @@
 
 <script>
 (function(){
-  let ctx,node,gain,playing=false,type='brown',targetVol=0.55;
-  let timerId=null,timerEnd=0,tickId=null,wakeLock=null;
-  let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0,lastBrown=0,lfo=0;
+  let playing=false,type='brown',targetVol=0.55;
+  let timerId=null,timerEnd=0,tickId=null,fadeTimer=null;
 
-  function makeNode(){
-    const n=ctx.createScriptProcessor(4096,0,1);
-    n.onaudioprocess=function(e){
-      const out=e.outputBuffer.getChannelData(0);
-      const lfoInc=(2*Math.PI*0.06)/ctx.sampleRate;
-      for(let i=0;i<out.length;i++){
-        const w=Math.random()*2-1;let s;
-        if(type==='white'){s=w*0.34;}
-        else if(type==='pink'){
-          b0=0.99886*b0+w*0.0555179;b1=0.99332*b1+w*0.0750759;
-          b2=0.96900*b2+w*0.1538520;b3=0.86650*b3+w*0.3104856;
-          b4=0.55000*b4+w*0.5329522;b5=-0.7616*b5-w*0.0168980;
-          s=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11;b6=w*0.115926;
-        } else {
-          lastBrown=(lastBrown+0.02*w)/1.02;s=lastBrown*3.2;
-          if(type==='ocean'){lfo+=lfoInc;s*=(0.5+0.5*Math.sin(lfo));}
-        }
-        out[i]=s;
+  /* ---------- noise rendered to seamless loops, played via a media element ----------
+     this is what makes Android show lock-screen controls AND keeps the sound
+     going with the screen off (raw Web Audio gets suspended in the background) ---- */
+  const SR=44100, LOOP=20, XF=0.5;
+  const labels={brown:'Brown noise',pink:'Pink noise',white:'White noise',ocean:'Ocean'};
+  const urls={};
+  const audioEl=new Audio(); audioEl.loop=true; audioEl.preload='auto';
+
+  function genSamples(t,n){
+    const a=new Float32Array(n);
+    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0,lastBrown=0,lfo=0;
+    const lfoInc=2*Math.PI*0.06/SR;
+    for(let i=0;i<n;i++){
+      const w=Math.random()*2-1;let s;
+      if(t==='white'){s=w*0.34;}
+      else if(t==='pink'){
+        b0=0.99886*b0+w*0.0555179;b1=0.99332*b1+w*0.0750759;
+        b2=0.96900*b2+w*0.1538520;b3=0.86650*b3+w*0.3104856;
+        b4=0.55000*b4+w*0.5329522;b5=-0.7616*b5-w*0.0168980;
+        s=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11;b6=w*0.115926;
+      } else {
+        lastBrown=(lastBrown+0.02*w)/1.02;s=lastBrown*3.2;
+        if(t==='ocean'){lfo+=lfoInc;s*=(0.5+0.5*Math.sin(lfo));}
       }
-    };
-    return n;
+      a[i]=s;
+    }
+    return a;
   }
-  function ensureAudio(){if(!ctx){ctx=new (window.AudioContext||window.webkitAudioContext)();gain=ctx.createGain();gain.gain.value=0;gain.connect(ctx.destination);}}
-  function start(){ensureAudio();if(ctx.state==='suspended')ctx.resume();node=makeNode();node.connect(gain);
-    const t=ctx.currentTime;gain.gain.cancelScheduledValues(t);gain.gain.setValueAtTime(gain.gain.value,t);
-    gain.gain.linearRampToValueAtTime(targetVol,t+0.6);playing=true;document.body.classList.add('playing');requestWake();}
-  function stop(fade){if(!playing)return;const t=ctx.currentTime;gain.gain.cancelScheduledValues(t);gain.gain.setValueAtTime(gain.gain.value,t);
-    gain.gain.linearRampToValueAtTime(0,t+(fade?4:0.4));const n=node;setTimeout(()=>{try{n.disconnect();}catch(e){}},(fade?4200:500));
-    playing=false;document.body.classList.remove('playing');releaseWake();clearTimer();}
+  function makeLoop(t){
+    const n=Math.floor(LOOP*SR),xf=Math.floor(XF*SR);
+    const raw=genSamples(t,n+xf),out=new Float32Array(n);
+    for(let i=0;i<n;i++)out[i]=raw[i];
+    for(let i=0;i<xf;i++){const p=i/xf;out[i]=raw[i]*Math.sin(p*Math.PI/2)+raw[n+i]*Math.cos(p*Math.PI/2);}
+    return out;
+  }
+  function encodeWAV(s){
+    const n=s.length,buf=new ArrayBuffer(44+n*2),v=new DataView(buf);
+    const w=(o,str)=>{for(let i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));};
+    w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);
+    v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,SR,true);v.setUint32(28,SR*2,true);
+    v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+    let o=44;for(let i=0;i<n;i++){let x=Math.max(-1,Math.min(1,s[i]));v.setInt16(o,x<0?x*32768:x*32767,true);o+=2;}
+    return new Blob([buf],{type:'audio/wav'});
+  }
+  function urlFor(t){if(!urls[t])urls[t]=URL.createObjectURL(encodeWAV(makeLoop(t)));return urls[t];}
+
+  function setSession(state){
+    if(!('mediaSession' in navigator))return;
+    try{
+      navigator.mediaSession.metadata=new MediaMetadata({title:'Lull',artist:labels[type]||'Noise',album:'Lull',
+        artwork:[{src:'icon-192.png',sizes:'192x192',type:'image/png'},{src:'icon-512.png',sizes:'512x512',type:'image/png'}]});
+      navigator.mediaSession.playbackState=state;
+    }catch(e){}
+  }
+  function start(){
+    if(fadeTimer){clearInterval(fadeTimer);fadeTimer=null;}
+    audioEl.src=urlFor(type);audioEl.loop=true;audioEl.volume=targetVol;
+    const p=audioEl.play();if(p&&p.catch)p.catch(()=>{});
+    playing=true;document.body.classList.add('playing');setSession('playing');
+  }
+  function stop(fade){
+    if(!playing)return;
+    playing=false;document.body.classList.remove('playing');setSession('paused');clearTimer();
+    if(fade){
+      let v=audioEl.volume;if(fadeTimer)clearInterval(fadeTimer);
+      fadeTimer=setInterval(()=>{v-=0.025;if(v<=0){clearInterval(fadeTimer);fadeTimer=null;audioEl.pause();audioEl.volume=targetVol;}else audioEl.volume=Math.max(0,v);},90);
+    } else {audioEl.pause();}
+  }
   function toggle(){playing?stop(false):start();}
 
-  async function requestWake(){try{if('wakeLock' in navigator)wakeLock=await navigator.wakeLock.request('screen');}catch(e){}}
-  function releaseWake(){try{if(wakeLock){wakeLock.release();wakeLock=null;}}catch(e){}}
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&playing&&!wakeLock)requestWake();});
+  if('mediaSession' in navigator){
+    try{
+      navigator.mediaSession.setActionHandler('play',()=>{if(!playing)start();});
+      navigator.mediaSession.setActionHandler('pause',()=>{if(playing)stop(false);});
+      navigator.mediaSession.setActionHandler('stop',()=>{if(playing)stop(false);});
+    }catch(e){}
+  }
 
   function clearTimer(){if(timerId)clearTimeout(timerId);if(tickId)clearInterval(tickId);timerId=tickId=null;timerEnd=0;document.querySelectorAll('.left').forEach(el=>el.textContent='');}
   function setTimer(min){clearTimer();document.querySelectorAll('.timer').forEach(t=>t.classList.toggle('active',+t.dataset.min===min));
@@ -221,9 +263,10 @@
 
   document.getElementById('orb').addEventListener('click',e=>{e.stopPropagation();toggle();});
   document.getElementById('sounds').addEventListener('click',e=>{const b=e.target.closest('.sound');if(!b)return;type=b.dataset.type;
-    document.querySelectorAll('.sound').forEach(x=>x.classList.toggle('active',x===b));lastBrown=0;lfo=0;});
+    document.querySelectorAll('.sound').forEach(x=>x.classList.toggle('active',x===b));
+    if(playing){audioEl.src=urlFor(type);audioEl.volume=targetVol;const p=audioEl.play();if(p&&p.catch)p.catch(()=>{});setSession('playing');}});
   const vol=document.getElementById('vol');
-  vol.addEventListener('input',()=>{targetVol=(vol.value/100)*0.9;if(playing&&gain){gain.gain.cancelScheduledValues(ctx.currentTime);gain.gain.setTargetAtTime(targetVol,ctx.currentTime,0.05);}});
+  vol.addEventListener('input',()=>{targetVol=(vol.value/100)*0.9;if(playing&&!fadeTimer)audioEl.volume=targetVol;});
   document.getElementById('timers').addEventListener('click',e=>{const b=e.target.closest('.timer');if(!b)return;setTimer(+b.dataset.min);});
 
   /* ---------- Full-screen offline video visual mode (0.5x, looping, muted) ---------- */
