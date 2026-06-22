@@ -155,6 +155,7 @@
 </style>
 </head>
 <body>
+  <!-- Rain sound: "Heavy Rain" by D W (freesound.org/people/D%20W/sounds/136971/), CC BY 3.0. See CREDITS.md. -->
   <div class="scene">
     <div class="sky"></div>
     <svg class="fell back" viewBox="0 0 1440 200" preserveAspectRatio="none" height="160">
@@ -231,14 +232,24 @@
   const SR=44100, LOOP=30, XF=0.5, HB_BPM=66;
   const labels={brown:'Brown noise',pink:'Pink noise',white:'White noise',ocean:'Ocean',snoo:'SNOO',heartbeat:'Heartbeat',rain:'Rain',fan:'Fan'};
   const buffers={};
-  const audioEl=new Audio(); audioEl.preload='auto'; audioEl.loop=false;
-  let ctx=null,master=null,dest=null,srcNode=null;
+  const audioEl=new Audio(); audioEl.preload='auto'; audioEl.loop=true;
+  let ctx=null,master=null,srcNode=null;
+  const FILES={rain:'sounds/rain.ogg'};   // real recordings (looped gaplessly); the rest are synth
+  function silentURL(){                     // a short silent clip: keeps audio focus + Media Session alive
+    const n=SR*2, buf=new ArrayBuffer(44+n*2), v=new DataView(buf);
+    const w=(o,str)=>{for(let i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));};
+    w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);
+    v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,SR,true);v.setUint32(28,SR*2,true);
+    v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+    return URL.createObjectURL(new Blob([buf],{type:'audio/wav'}));
+  }
+  audioEl.src=silentURL();
   function ensureCtx(){
     if(ctx)return;
     ctx=new (window.AudioContext||window.webkitAudioContext)();
     master=ctx.createGain(); master.gain.value=1;
-    dest=ctx.createMediaStreamDestination(); master.connect(dest);
-    audioEl.srcObject=dest.stream;
+    master.connect(ctx.destination);       // gapless audio straight to the speakers
+    ensureBuf('rain').catch(()=>{});        // warm the rain recording in the background
   }
   function thump(x,f0,f1,k,dec,amp){            // pitch-dropping enveloped low thud
     if(x<0)return 0;
@@ -290,11 +301,12 @@
         lp=lp+0.08*(w-lp); hum+=humInc;
         s=lp*1.7+Math.sin(hum)*0.04;
       }
-      else if(t==='heartbeat'){      // soft womb bed + realistic lub-dub thud
-        lastBrown=(lastBrown+0.02*w)/1.02; const bed=lastBrown*2.6;
+      else if(t==='heartbeat'){      // dominant lub-dub thud over a faint deep hush
+        lastBrown=(lastBrown+0.02*w)/1.02; lp=lp+0.05*(lastBrown-lp);
+        const bed=lp*2.0;
         const tb=(i-Math.floor(i/beatLen)*beatLen)/SR;
-        const beat=thump(tb,80,42,28,13,1.0)+thump(tb-0.17,66,36,28,15,0.72);
-        s=bed*0.4+beat*0.62;
+        const beat=thump(tb,82,40,26,11,1.0)+thump(tb-0.17,62,33,26,13,0.74);
+        s=bed*0.12+beat*0.92;
       }
       else {s=w*0.2;}
       a[i]=s;
@@ -308,15 +320,30 @@
     for(let i=0;i<xf;i++){const p=i/xf;out[i]=raw[i]*Math.sin(p*Math.PI/2)+raw[n+i]*Math.cos(p*Math.PI/2);}
     return out;
   }
-  function bufFor(t){
-    if(buffers[t])return buffers[t];
+  function synthBuf(t){
+    const key=t+'__synth';
+    if(buffers[key])return buffers[key];
     const data=makeLoop(t), b=ctx.createBuffer(1,data.length,SR);
-    b.copyToChannel(data,0); buffers[t]=b; return b;
+    b.copyToChannel(data,0); buffers[key]=b; return b;
   }
-  function playSource(t){
+  function ensureBuf(t){                    // -> Promise<AudioBuffer> (real file, else synth)
+    if(buffers[t])return Promise.resolve(buffers[t]);
+    if(FILES[t]){
+      return fetch(FILES[t]).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer();})
+        .then(a=>new Promise((res,rej)=>ctx.decodeAudioData(a,res,rej)))
+        .then(b=>{buffers[t]=b;return b;});
+    }
+    return Promise.resolve(synthBuf(t));
+  }
+  let playReq=0;
+  function attach(b){
     if(srcNode){try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null;}
-    srcNode=ctx.createBufferSource(); srcNode.buffer=bufFor(t); srcNode.loop=true;
+    srcNode=ctx.createBufferSource(); srcNode.buffer=b; srcNode.loop=true;
     srcNode.connect(master); srcNode.start();
+  }
+  function startSource(t){                   // keep current sound playing until the new buffer is ready, then swap
+    const my=++playReq;
+    return ensureBuf(t).catch(()=>synthBuf(t)).then(b=>{ if(my!==playReq||!playing)return; attach(b); });
   }
 
   function setSession(state){
@@ -331,11 +358,12 @@
     if(fadeTimer){clearTimeout(fadeTimer);fadeTimer=null;}
     ensureCtx(); if(ctx.state==='suspended')ctx.resume();
     master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=1;
-    playSource(type);
-    const p=audioEl.play();if(p&&p.catch)p.catch(()=>{});
     playing=true;document.body.classList.add('playing');setSession('playing');
+    startSource(type);
+    const p=audioEl.play();if(p&&p.catch)p.catch(()=>{});
   }
   function hardStop(){
+    playReq++;
     if(srcNode){try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null;}
     audioEl.pause(); if(master)master.gain.value=1;
   }
@@ -353,18 +381,18 @@
   function toggle(){playing?stop(false):start();}
 
   const ORDER=['brown','pink','white','ocean','snoo','heartbeat','rain','fan'];
-  function setType(t){
+  async function setType(t){
     type=t;
     document.querySelectorAll('.sound').forEach(x=>x.classList.toggle('active',x.dataset.type===t));
+    setSession(playing?'playing':'paused');
     if(playing && ctx){
       const t0=ctx.currentTime;
       master.gain.cancelScheduledValues(t0); master.gain.setValueAtTime(Math.max(0.0001,master.gain.value),t0);
-      master.gain.linearRampToValueAtTime(0.0001,t0+0.06);
-      setTimeout(()=>{ if(!playing)return; playSource(type);
-        const t1=ctx.currentTime; master.gain.setValueAtTime(0.0001,t1); master.gain.linearRampToValueAtTime(1,t1+0.08);
-      },75);
+      master.gain.linearRampToValueAtTime(0.0001,t0+0.05);
+      await startSource(t);
+      if(type!==t||!playing)return;
+      const t1=ctx.currentTime; master.gain.setValueAtTime(0.0001,t1); master.gain.linearRampToValueAtTime(1,t1+0.08);
     }
-    setSession(playing?'playing':'paused');
   }
   function skip(d){const i=ORDER.indexOf(type);setType(ORDER[(i+d+ORDER.length)%ORDER.length]);}
 
