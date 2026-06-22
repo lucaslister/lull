@@ -1,4 +1,4 @@
-const CACHE = 'lull-v11';
+const CACHE = 'lull-v12';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './brown.webm', './pink.webm', './white.webm', './snoo.webm', './fan.webm', './ocean.webm', './rain.webm', './heart.webm'];
 
 self.addEventListener('install', e => {

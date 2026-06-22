@@ -267,7 +267,7 @@
   function setSession(state){
     if(!('mediaSession' in navigator))return;
     try{
-      navigator.mediaSession.metadata=new MediaMetadata({title:'Lull',artist:labels[type]||'Noise',album:'Lull',
+      navigator.mediaSession.metadata=new MediaMetadata({title:labels[type]||'Lull',artist:'Lull',album:'Lull',
         artwork:[{src:'icon-192.png',sizes:'192x192',type:'image/png'},{src:'icon-512.png',sizes:'512x512',type:'image/png'}]});
       navigator.mediaSession.playbackState=state;
     }catch(e){}
