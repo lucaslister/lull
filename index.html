@@ -248,15 +248,11 @@
   }
   function skip(d){const i=ORDER.indexOf(type);setType(ORDER[(i+d+ORDER.length)%ORDER.length]);}
 
-  if('mediaSession' in navigator){
-    try{
-      navigator.mediaSession.setActionHandler('play',()=>{if(!playing)start();});
-      navigator.mediaSession.setActionHandler('pause',()=>{if(playing)stop(false);});
-      navigator.mediaSession.setActionHandler('stop',()=>{if(playing)stop(false);});
-      navigator.mediaSession.setActionHandler('nexttrack',()=>skip(1));
-      navigator.mediaSession.setActionHandler('previoustrack',()=>skip(-1));
-    }catch(e){}
-  }
+  function setAH(a,fn){if('mediaSession' in navigator){try{navigator.mediaSession.setActionHandler(a,fn);}catch(e){}}}
+  setAH('play',()=>{if(!playing)start();});
+  setAH('pause',()=>{if(playing)stop(false);});
+  setAH('nexttrack',()=>skip(1));
+  setAH('previoustrack',()=>skip(-1));
 
   function clearTimer(){if(timerId)clearTimeout(timerId);if(tickId)clearInterval(tickId);timerId=tickId=null;timerEnd=0;document.querySelectorAll('.left').forEach(el=>el.textContent='');}
   function setTimer(min){clearTimer();document.querySelectorAll('.timer').forEach(t=>t.classList.toggle('active',+t.dataset.min===min));
