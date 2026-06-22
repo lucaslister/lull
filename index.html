@@ -44,8 +44,8 @@
 
   /* ---------- Orb / sun / play ---------- */
   .stage{flex:1;display:flex;justify-content:center;width:100%;position:relative;z-index:2;
-    pointer-events:none;align-items:flex-start;padding-top:46vh;transition:padding-top .9s ease}
-  .orb-wrap{position:relative;width:min(46vw,180px);aspect-ratio:1;pointer-events:auto;transition:width .9s ease}
+    pointer-events:none;align-items:center;padding-top:0;transition:padding-top .9s ease}
+  .orb-wrap{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(46vw,180px);aspect-ratio:1;pointer-events:auto;z-index:2}
   .orb{position:absolute;inset:0;border-radius:50%;cursor:pointer;
     background:radial-gradient(circle at 50% 45%,#FFE9BE 0%,#FBC264 42%,#F39B3C 72%,#E07A2E 100%);
     box-shadow:0 0 70px 18px rgba(251,190,98,.45),0 0 160px 60px rgba(240,120,50,.22);
@@ -101,6 +101,7 @@
 
   body.focus .panel,body.focus header,body.focus .corner,body.focus .orb-hint,body.focus .stage{opacity:0;pointer-events:none}
   body.focus .scene{pointer-events:auto;cursor:pointer}
+  body.focus .orb-wrap{pointer-events:none}
   body.focus .shimmer{display:none}
   body.dim{filter:brightness(.1) saturate(.8)}
   body.dim .panel,body.dim header,body.dim .corner,body.dim .orb-hint{opacity:0;pointer-events:none}
