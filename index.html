@@ -234,7 +234,7 @@
   const buffers={};
   const audioEl=new Audio(); audioEl.preload='auto'; audioEl.loop=true;
   let ctx=null,master=null,srcNode=null;
-  const FILES={rain:'sounds/rain.ogg'};   // real recordings (looped gaplessly); the rest are synth
+  const FILES={rain:'rain.ogg'};   // real recordings (looped gaplessly); the rest are synth
   function silentURL(){                     // a short silent clip: keeps audio focus + Media Session alive
     const n=SR*2, buf=new ArrayBuffer(44+n*2), v=new DataView(buf);
     const w=(o,str)=>{for(let i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));};
