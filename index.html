@@ -226,31 +226,14 @@
   let playing=false,type='brown';
   let timerId=null,timerEnd=0,tickId=null,fadeTimer=null;
 
-  /* ---------- gapless audio: a Web Audio buffer loops seamlessly (sample-accurate,
-     no gap) and is piped to a media element via MediaStreamDestination, so we keep
-     Android lock-screen controls + screen-off playback AND lose the loop gap -------- */
-  const SR=44100, LOOP=30, XF=0.5, HB_BPM=66;
+  /* ---------- audio: long seamless WAV loops played by a media element ----------
+     a media element with a real src is what makes Android surface working lock-screen
+     controls (play / pause / skip + title). 10-min loops keep the brief seam rare. */
+  const SR=44100, LOOP=600, XF=0.5, HB_BPM=66;   // 10-minute loops
   const labels={brown:'Brown noise',pink:'Pink noise',white:'White noise',ocean:'Ocean',snoo:'SNOO',heartbeat:'Heartbeat',rain:'Rain',fan:'Fan'};
-  const buffers={};
+  const FILES={rain:'rain.ogg',ocean:'ocean.ogg',heartbeat:'heart.ogg'};                  // real recording (its own 10-min loop)
+  const urls={};
   const audioEl=new Audio(); audioEl.preload='auto'; audioEl.loop=true;
-  let ctx=null,master=null,srcNode=null;
-  const FILES={rain:'rain.ogg'};   // real recordings (looped gaplessly); the rest are synth
-  function silentURL(){                     // a short silent clip: keeps audio focus + Media Session alive
-    const n=SR*2, buf=new ArrayBuffer(44+n*2), v=new DataView(buf);
-    const w=(o,str)=>{for(let i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));};
-    w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);
-    v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,SR,true);v.setUint32(28,SR*2,true);
-    v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
-    return URL.createObjectURL(new Blob([buf],{type:'audio/wav'}));
-  }
-  audioEl.src=silentURL();
-  function ensureCtx(){
-    if(ctx)return;
-    ctx=new (window.AudioContext||window.webkitAudioContext)();
-    master=ctx.createGain(); master.gain.value=1;
-    master.connect(ctx.destination);       // gapless audio straight to the speakers
-    ensureBuf('rain').catch(()=>{});        // warm the rain recording in the background
-  }
   function thump(x,f0,f1,k,dec,amp){            // pitch-dropping enveloped low thud
     if(x<0)return 0;
     const env=amp*Math.exp(-x*dec)*(1-Math.exp(-x*340));
@@ -262,8 +245,8 @@
   function genSamples(t,n){
     const a=new Float32Array(n);
     let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0,lastBrown=0,lfo=0,lp=0,lp2=0,hum=0,gust=0;
-    const lfoInc=2*Math.PI*(2/LOOP)/SR, humInc=2*Math.PI*120/SR, gustInc=2*Math.PI*(3/LOOP)/SR;
-    const beats=Math.round(LOOP*HB_BPM/60), beatLen=(LOOP*SR)/beats;
+    const lfoInc=2*Math.PI*0.08/SR, humInc=2*Math.PI*120/SR, gustInc=2*Math.PI*0.1/SR;
+    const beatLen=SR*60/HB_BPM;
     const NR=6, dA=new Float32Array(NR), dP=new Float32Array(NR), dI=new Float32Array(NR);
     for(let i=0;i<n;i++){
       const w=Math.random()*2-1; let s;
@@ -320,30 +303,19 @@
     for(let i=0;i<xf;i++){const p=i/xf;out[i]=raw[i]*Math.sin(p*Math.PI/2)+raw[n+i]*Math.cos(p*Math.PI/2);}
     return out;
   }
-  function synthBuf(t){
-    const key=t+'__synth';
-    if(buffers[key])return buffers[key];
-    const data=makeLoop(t), b=ctx.createBuffer(1,data.length,SR);
-    b.copyToChannel(data,0); buffers[key]=b; return b;
+  function encodeWAV(s){
+    const n=s.length,buf=new ArrayBuffer(44+n*2),v=new DataView(buf);
+    const w=(o,str)=>{for(let i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));};
+    w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);
+    v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,SR,true);v.setUint32(28,SR*2,true);
+    v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+    let o=44;for(let i=0;i<n;i++){let x=s[i];x=x<-1?-1:x>1?1:x;v.setInt16(o,x<0?x*32768:x*32767,true);o+=2;}
+    return new Blob([buf],{type:'audio/wav'});
   }
-  function ensureBuf(t){                    // -> Promise<AudioBuffer> (real file, else synth)
-    if(buffers[t])return Promise.resolve(buffers[t]);
-    if(FILES[t]){
-      return fetch(FILES[t]).then(r=>{if(!r.ok)throw 0;return r.arrayBuffer();})
-        .then(a=>new Promise((res,rej)=>ctx.decodeAudioData(a,res,rej)))
-        .then(b=>{buffers[t]=b;return b;});
-    }
-    return Promise.resolve(synthBuf(t));
-  }
-  let playReq=0;
-  function attach(b){
-    if(srcNode){try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null;}
-    srcNode=ctx.createBufferSource(); srcNode.buffer=b; srcNode.loop=true;
-    srcNode.connect(master); srcNode.start();
-  }
-  function startSource(t){                   // keep current sound playing until the new buffer is ready, then swap
-    const my=++playReq;
-    return ensureBuf(t).catch(()=>synthBuf(t)).then(b=>{ if(my!==playReq||!playing)return; attach(b); });
+  function urlFor(t){
+    if(FILES[t])return FILES[t];
+    if(!urls[t])urls[t]=URL.createObjectURL(encodeWAV(makeLoop(t)));
+    return urls[t];
   }
 
   function setSession(state){
@@ -355,44 +327,27 @@
     }catch(e){}
   }
   function start(){
-    if(fadeTimer){clearTimeout(fadeTimer);fadeTimer=null;}
-    ensureCtx(); if(ctx.state==='suspended')ctx.resume();
-    master.gain.cancelScheduledValues(ctx.currentTime); master.gain.value=1;
-    playing=true;document.body.classList.add('playing');setSession('playing');
-    startSource(type);
+    if(fadeTimer){clearInterval(fadeTimer);fadeTimer=null;}
+    audioEl.src=urlFor(type); audioEl.loop=true; audioEl.volume=1;
     const p=audioEl.play();if(p&&p.catch)p.catch(()=>{});
-  }
-  function hardStop(){
-    playReq++;
-    if(srcNode){try{srcNode.stop();}catch(e){} try{srcNode.disconnect();}catch(e){} srcNode=null;}
-    audioEl.pause(); if(master)master.gain.value=1;
+    playing=true;document.body.classList.add('playing');setSession('playing');
   }
   function stop(fade){
     if(!playing)return;
     playing=false;document.body.classList.remove('playing');setSession('paused');clearTimer();
-    if(fade && ctx){
-      const t0=ctx.currentTime;
-      master.gain.cancelScheduledValues(t0); master.gain.setValueAtTime(Math.max(0.0001,master.gain.value),t0);
-      master.gain.linearRampToValueAtTime(0.0001,t0+3);
-      if(fadeTimer)clearTimeout(fadeTimer);
-      fadeTimer=setTimeout(()=>{fadeTimer=null;hardStop();},3150);
-    } else { hardStop(); }
+    if(fade){
+      let v=audioEl.volume; if(fadeTimer)clearInterval(fadeTimer);
+      fadeTimer=setInterval(()=>{v-=0.02; if(v<=0){clearInterval(fadeTimer);fadeTimer=null;audioEl.pause();audioEl.volume=1;} else audioEl.volume=Math.max(0,v);},80);
+    } else { audioEl.pause(); }
   }
   function toggle(){playing?stop(false):start();}
 
   const ORDER=['brown','pink','white','ocean','snoo','heartbeat','rain','fan'];
-  async function setType(t){
+  function setType(t){
     type=t;
     document.querySelectorAll('.sound').forEach(x=>x.classList.toggle('active',x.dataset.type===t));
+    if(playing){ audioEl.src=urlFor(type); audioEl.loop=true; audioEl.volume=1; const p=audioEl.play(); if(p&&p.catch)p.catch(()=>{}); }
     setSession(playing?'playing':'paused');
-    if(playing && ctx){
-      const t0=ctx.currentTime;
-      master.gain.cancelScheduledValues(t0); master.gain.setValueAtTime(Math.max(0.0001,master.gain.value),t0);
-      master.gain.linearRampToValueAtTime(0.0001,t0+0.05);
-      await startSource(t);
-      if(type!==t||!playing)return;
-      const t1=ctx.currentTime; master.gain.setValueAtTime(0.0001,t1); master.gain.linearRampToValueAtTime(1,t1+0.08);
-    }
   }
   function skip(d){const i=ORDER.indexOf(type);setType(ORDER[(i+d+ORDER.length)%ORDER.length]);}
 
@@ -501,7 +456,7 @@
   document.getElementById('mCalUp').addEventListener('click',()=>setCal(1));
   document.getElementById('mCalDn').addEventListener('click',()=>setCal(-1));
 
-  document.addEventListener('visibilitychange',()=>{ if(!document.hidden && ctx && ctx.state==='suspended' && playing){ctx.resume();} });
+
 })();
 </script>
 <script>

@@ -1,13 +1,18 @@
 # Lull — sound credits
 
-Most sounds in Lull (Brown, Pink, White, Ocean, SNOO, Heartbeat, Fan) are generated
-procedurally in the browser and are original.
+Brown, Pink, White, SNOO and Fan are generated procedurally in the browser (original).
 
-The **Rain** sound is a real recording used under Creative Commons Attribution:
+Three sounds are real recordings used under open licences:
 
-- **"Heavy Rain"** by **D W** — https://freesound.org/people/D%20W/sounds/136971/
-  Licensed under **CC BY 3.0** (https://creativecommons.org/licenses/by/3.0/).
-  The clip was loudness-normalised and re-encoded to OGG for looping; no other changes.
+- **Rain** — "Heavy Rain" by **D W**, https://freesound.org/people/D%20W/sounds/136971/ —
+  **CC BY 3.0** (https://creativecommons.org/licenses/by/3.0/).
+- **Ocean** — "Waves" from the **Moodist** project, https://github.com/remvze/moodist —
+  Moodist's sounds are provided under the **Pixabay Content License** / **CC0**
+  (https://pixabay.com/service/license-summary/).
+- **Heartbeat** — "heartbeat-60bpm" by **Ben Holmes**, https://github.com/bencholmes/heartbeat —
+  **CC0 1.0** (public domain, https://creativecommons.org/publicdomain/zero/1.0/).
 
-If you replace `rain.ogg` with a different recording, update this attribution
-accordingly (or remove it if the replacement is CC0 / public domain).
+Rain and ocean were loudness-normalised and looped to ~10 minutes. The heartbeat was cut to a
+clean 3-beat loop, heavily low-pass filtered and warmed to sound muffled and womb-like (the way a
+baby hears it in utero rather than through a stethoscope), then looped to ~10 minutes.
+If you swap any file, update this attribution accordingly.

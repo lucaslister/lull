@@ -1,5 +1,5 @@
-const CACHE = 'lull-v6';
-const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './rain.ogg'];
+const CACHE = 'lull-v9';
+const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './rain.ogg', './ocean.ogg', './heart.ogg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
