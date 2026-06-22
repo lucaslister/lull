@@ -35,17 +35,14 @@
     filter:blur(7px);animation:shimmer 5.5s ease-in-out infinite}
   @keyframes shimmer{0%,100%{opacity:.55;width:54px}50%{opacity:.9;width:74px}}
 
-  /* ---------- Full-screen video visual mode ---------- */
-  #video{position:fixed;inset:0;z-index:8;background:#000;opacity:0;pointer-events:none;
-    transition:opacity 1s ease;overflow:hidden}
-  body.video #video{opacity:1;pointer-events:auto}
-  #vid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
-  .vtap{position:absolute;inset:0;z-index:2;cursor:pointer}
-  .video-hint{position:absolute;left:0;right:0;bottom:46px;text-align:center;z-index:3;
+  /* ---------- Focus mode: full-screen pastel colour orbs, no UI ---------- */
+  #focus{position:fixed;inset:0;z-index:8;background:#070611;opacity:0;pointer-events:none;transition:opacity 1s ease}
+  body.focus #focus{opacity:1;pointer-events:auto;cursor:pointer}
+  .focus-hint{position:fixed;left:0;right:0;bottom:46px;text-align:center;z-index:9;
     font-size:13px;letter-spacing:.06em;color:rgba(255,255,255,.85);text-shadow:0 1px 8px rgba(0,0,0,.6);
     opacity:0;transition:opacity .6s ease;pointer-events:none}
-  body.video .video-hint{opacity:.9}
-  body.video.hidehint .video-hint{opacity:0}
+  body.focus .focus-hint{opacity:.9}
+  body.focus.hidehint .focus-hint{opacity:0}
 
   /* ---------- Orb / sun / play ---------- */
   .stage{flex:1;display:flex;justify-content:center;width:100%;position:relative;z-index:2;
@@ -104,7 +101,7 @@
   .glowbtn.on{color:#BFD6FF;border-color:#BFD6FF}
   .moon{right:20px}
 
-  body.video .panel,body.video header,body.video .corner,body.video .orb-hint,body.video .stage{opacity:0;pointer-events:none}
+  body.focus .scene,body.focus .panel,body.focus header,body.focus .corner,body.focus .orb-hint,body.focus .stage{opacity:0;pointer-events:none}
   body.dim{filter:brightness(.1) saturate(.8)}
   body.dim .panel,body.dim header,body.dim .corner,body.dim .orb-hint{opacity:0;pointer-events:none}
   body.dim .stage{pointer-events:auto;cursor:pointer}
@@ -124,13 +121,9 @@
     </svg>
     <div class="water"><div class="shimmer"></div></div>
   </div>
-  <div id="video">
-    <video id="vid" src="glow.mp4" muted loop playsinline preload="auto"></video>
-    <div class="vtap" id="vtap"></div>
-    <div class="video-hint" id="videoHint">tap to exit</div>
-  </div>
+  <canvas id="focus"></canvas>
 
-  <button class="corner glowbtn" id="glowbtn" aria-label="Open visual mode">✦</button>
+  <button class="corner glowbtn" id="glowbtn" aria-label="Open focus mode">✦</button>
   <button class="corner moon" id="moon" aria-label="Dim screen">☾</button>
 
   <header><div class="mark">Lull</div></header>
@@ -168,6 +161,7 @@
     </div>
   </div>
 
+  <div class="focus-hint">tap to exit</div>
   <div class="dim-tip">tap anywhere to wake</div>
 
 <script>
@@ -245,11 +239,22 @@
   }
   function toggle(){playing?stop(false):start();}
 
+  const ORDER=['brown','pink','white','ocean'];
+  function setType(t){
+    type=t;
+    document.querySelectorAll('.sound').forEach(x=>x.classList.toggle('active',x.dataset.type===t));
+    if(playing){audioEl.src=urlFor(type);audioEl.volume=targetVol;const p=audioEl.play();if(p&&p.catch)p.catch(()=>{});}
+    setSession(playing?'playing':'paused');
+  }
+  function skip(d){const i=ORDER.indexOf(type);setType(ORDER[(i+d+ORDER.length)%ORDER.length]);}
+
   if('mediaSession' in navigator){
     try{
       navigator.mediaSession.setActionHandler('play',()=>{if(!playing)start();});
       navigator.mediaSession.setActionHandler('pause',()=>{if(playing)stop(false);});
       navigator.mediaSession.setActionHandler('stop',()=>{if(playing)stop(false);});
+      navigator.mediaSession.setActionHandler('nexttrack',()=>skip(1));
+      navigator.mediaSession.setActionHandler('previoustrack',()=>skip(-1));
     }catch(e){}
   }
 
@@ -262,29 +267,48 @@
   function resetTimerUI(){document.querySelectorAll('.timer').forEach(t=>t.classList.toggle('active',+t.dataset.min===0));document.querySelectorAll('.left').forEach(el=>el.textContent='');}
 
   document.getElementById('orb').addEventListener('click',e=>{e.stopPropagation();toggle();});
-  document.getElementById('sounds').addEventListener('click',e=>{const b=e.target.closest('.sound');if(!b)return;type=b.dataset.type;
-    document.querySelectorAll('.sound').forEach(x=>x.classList.toggle('active',x===b));
-    if(playing){audioEl.src=urlFor(type);audioEl.volume=targetVol;const p=audioEl.play();if(p&&p.catch)p.catch(()=>{});setSession('playing');}});
+  document.getElementById('sounds').addEventListener('click',e=>{const b=e.target.closest('.sound');if(!b)return;setType(b.dataset.type);});
   const vol=document.getElementById('vol');
   vol.addEventListener('input',()=>{targetVol=(vol.value/100)*0.9;if(playing&&!fadeTimer)audioEl.volume=targetVol;});
   document.getElementById('timers').addEventListener('click',e=>{const b=e.target.closest('.timer');if(!b)return;setTimer(+b.dataset.min);});
 
-  /* ---------- Full-screen offline video visual mode (0.5x, looping, muted) ---------- */
-  const vid=document.getElementById('vid');
-  let videoOn=false,hintTimer=null;
-  function setRate(){try{vid.playbackRate=0.5;}catch(e){}}
-  vid.addEventListener('loadedmetadata',setRate);
-  vid.addEventListener('play',setRate);
-  function enterVideo(){
-    videoOn=true;document.body.classList.add('video');document.body.classList.remove('hidehint');
-    setRate();const p=vid.play();if(p&&p.catch)p.catch(()=>{});setRate();
-    if(hintTimer)clearTimeout(hintTimer);
-    hintTimer=setTimeout(()=>document.body.classList.add('hidehint'),3500);
+  /* ---------- Focus mode: full-screen pastel colour orbs (no UI, tap to exit) ---------- */
+  const fc=document.getElementById('focus'),fx=fc.getContext('2d');
+  let focusOn=false,fraf=null,ft0=null,orbs=[],hintTimer=null,fdpr=Math.min(window.devicePixelRatio||1,2);
+  function fsize(){fc.width=innerWidth*fdpr;fc.height=innerHeight*fdpr;}
+  function initOrbs(){
+    orbs=[];const W=fc.width,H=fc.height,base=[12,52,128,178,222,292];
+    for(let i=0;i<6;i++){
+      orbs.push({hue:base[i],
+        ax:W*(0.20+Math.random()*0.18),ay:H*(0.20+Math.random()*0.18),
+        sx:0.00010+Math.random()*0.00012,sy:0.00009+Math.random()*0.00011,
+        px:Math.random()*6.2832,py:Math.random()*6.2832,
+        r:Math.min(W,H)*(0.34+Math.random()*0.18)});
+    }
   }
-  function exitVideo(){videoOn=false;document.body.classList.remove('video');try{vid.pause();}catch(e){}}
+  function fdraw(ts){
+    if(!ft0)ft0=ts;const t=ts-ft0,W=fc.width,H=fc.height;
+    fx.globalCompositeOperation='source-over';fx.fillStyle='#070611';fx.fillRect(0,0,W,H);
+    fx.globalCompositeOperation='lighter';
+    const drift=t*0.004;
+    for(const o of orbs){
+      const x=W/2+Math.sin(t*o.sx+o.px)*o.ax,y=H/2+Math.cos(t*o.sy+o.py)*o.ay,hue=(o.hue+drift)%360;
+      const g=fx.createRadialGradient(x,y,0,x,y,o.r);
+      g.addColorStop(0,'hsla('+hue+',82%,72%,0.5)');
+      g.addColorStop(0.4,'hsla('+hue+',82%,64%,0.16)');
+      g.addColorStop(1,'hsla('+hue+',82%,60%,0)');
+      fx.fillStyle=g;fx.beginPath();fx.arc(x,y,o.r,0,6.2832);fx.fill();
+    }
+    fraf=requestAnimationFrame(fdraw);
+  }
+  function enterFocus(){focusOn=true;document.body.classList.add('focus');document.body.classList.remove('hidehint');
+    fsize();initOrbs();ft0=null;if(!fraf)fraf=requestAnimationFrame(fdraw);
+    if(hintTimer)clearTimeout(hintTimer);hintTimer=setTimeout(()=>document.body.classList.add('hidehint'),3500);}
+  function exitFocus(){focusOn=false;document.body.classList.remove('focus');if(fraf){cancelAnimationFrame(fraf);fraf=null;}}
+  window.addEventListener('resize',()=>{if(focusOn){fsize();initOrbs();}});
   const gbtn=document.getElementById('glowbtn');
-  gbtn.addEventListener('click',e=>{e.stopPropagation();videoOn?exitVideo():enterVideo();});
-  document.getElementById('vtap').addEventListener('click',exitVideo);
+  gbtn.addEventListener('click',e=>{e.stopPropagation();focusOn?exitFocus():enterFocus();});
+  document.getElementById('focus').addEventListener('click',exitFocus);
 
   const moon=document.getElementById('moon');
   moon.addEventListener('click',e=>{e.stopPropagation();document.body.classList.add('dim');});
