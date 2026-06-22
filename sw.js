@@ -1,4 +1,4 @@
-const CACHE = 'lull-v9';
+const CACHE = 'lull-v10';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './rain.ogg', './ocean.ogg', './heart.ogg'];
 
 self.addEventListener('install', e => {
