@@ -35,9 +35,7 @@
     filter:blur(7px);animation:shimmer 5.5s ease-in-out infinite}
   @keyframes shimmer{0%,100%{opacity:.55;width:54px}50%{opacity:.9;width:74px}}
 
-  /* ---------- Focus mode: full-screen pastel colour orbs, no UI ---------- */
-  #focus{position:fixed;inset:0;z-index:8;background:#070611;opacity:0;pointer-events:none;transition:opacity 1s ease}
-  body.focus #focus{opacity:1;pointer-events:auto;cursor:pointer}
+  /* ---------- Focus mode: full-screen home background + hint ---------- */
   .focus-hint{position:fixed;left:0;right:0;bottom:46px;text-align:center;z-index:9;
     font-size:13px;letter-spacing:.06em;color:rgba(255,255,255,.85);text-shadow:0 1px 8px rgba(0,0,0,.6);
     opacity:0;transition:opacity .6s ease;pointer-events:none}
@@ -101,7 +99,9 @@
   .glowbtn.on{color:#BFD6FF;border-color:#BFD6FF}
   .moon{right:20px}
 
-  body.focus .scene,body.focus .panel,body.focus header,body.focus .corner,body.focus .orb-hint,body.focus .stage{opacity:0;pointer-events:none}
+  body.focus .panel,body.focus header,body.focus .corner,body.focus .orb-hint,body.focus .stage{opacity:0;pointer-events:none}
+  body.focus .scene{pointer-events:auto;cursor:pointer}
+  body.focus .shimmer{display:none}
   body.dim{filter:brightness(.1) saturate(.8)}
   body.dim .panel,body.dim header,body.dim .corner,body.dim .orb-hint{opacity:0;pointer-events:none}
   body.dim .stage{pointer-events:auto;cursor:pointer}
@@ -121,7 +121,6 @@
     </svg>
     <div class="water"><div class="shimmer"></div></div>
   </div>
-  <canvas id="focus"></canvas>
 
   <button class="corner glowbtn" id="glowbtn" aria-label="Open focus mode">✦</button>
   <button class="corner moon" id="moon" aria-label="Dim screen">☾</button>
@@ -268,43 +267,37 @@
   vol.addEventListener('input',()=>{targetVol=(vol.value/100)*0.9;if(playing&&!fadeTimer)audioEl.volume=targetVol;});
   document.getElementById('timers').addEventListener('click',e=>{const b=e.target.closest('.timer');if(!b)return;setTimer(+b.dataset.min);});
 
-  /* ---------- Focus mode: full-screen pastel colour orbs (no UI, tap to exit) ---------- */
-  const fc=document.getElementById('focus'),fx=fc.getContext('2d');
-  let focusOn=false,fraf=null,ft0=null,orbs=[],hintTimer=null,fdpr=Math.min(window.devicePixelRatio||1,2);
-  function fsize(){fc.width=innerWidth*fdpr;fc.height=innerHeight*fdpr;}
-  function initOrbs(){
-    orbs=[];const W=fc.width,H=fc.height,base=[12,52,128,178,222,292];
-    for(let i=0;i<6;i++){
-      orbs.push({hue:base[i],
-        ax:W*(0.20+Math.random()*0.18),ay:H*(0.20+Math.random()*0.18),
-        sx:0.00010+Math.random()*0.00012,sy:0.00009+Math.random()*0.00011,
-        px:Math.random()*6.2832,py:Math.random()*6.2832,
-        r:Math.min(W,H)*(0.34+Math.random()*0.18)});
-    }
-  }
-  function fdraw(ts){
-    if(!ft0)ft0=ts;const t=ts-ft0,W=fc.width,H=fc.height;
-    fx.globalCompositeOperation='source-over';fx.fillStyle='#070611';fx.fillRect(0,0,W,H);
-    fx.globalCompositeOperation='lighter';
-    const drift=t*0.004;
-    for(const o of orbs){
-      const x=W/2+Math.sin(t*o.sx+o.px)*o.ax,y=H/2+Math.cos(t*o.sy+o.py)*o.ay,hue=(o.hue+drift)%360;
-      const g=fx.createRadialGradient(x,y,0,x,y,o.r);
-      g.addColorStop(0,'hsla('+hue+',82%,72%,0.5)');
-      g.addColorStop(0.4,'hsla('+hue+',82%,64%,0.16)');
-      g.addColorStop(1,'hsla('+hue+',82%,60%,0)');
-      fx.fillStyle=g;fx.beginPath();fx.arc(x,y,o.r,0,6.2832);fx.fill();
-    }
-    fraf=requestAnimationFrame(fdraw);
+  /* ---------- Focus mode: home background, colours drifting through the day (no UI) ---------- */
+  const SKY=[
+    [[10,14,36],[24,30,64],[46,40,84],[64,54,104]],        // night
+    [[40,33,78],[110,66,98],[205,118,92],[240,168,112]],   // dawn
+    [[42,86,150],[92,138,188],[165,198,222],[208,226,238]],// midday
+    [[36,27,61],[142,61,94],[221,111,56],[248,184,85]],    // golden hour
+    [[26,20,48],[74,43,85],[150,70,72],[181,86,62]]        // dusk
+  ];
+  const POS=[0,50,78,100], DAY_MS=90000;
+  const sky=document.querySelector('.sky'), water=document.querySelector('.water');
+  let focusOn=false,fInt=null,fStart=0,hintTimer=null;
+  const L=(x,y,t)=>Math.round(x+(y-x)*t);
+  function applyDay(ms){
+    const N=SKY.length, phase=(ms%DAY_MS)/DAY_MS*N;
+    const i=Math.floor(phase)%N, j=(i+1)%N; let f=phase-Math.floor(phase); f=f*f*(3-2*f);
+    const cols=[];
+    for(let k=0;k<4;k++){const A=SKY[i][k],B=SKY[j][k];cols.push([L(A[0],B[0],f),L(A[1],B[1],f),L(A[2],B[2],f)]);}
+    sky.style.background='linear-gradient(180deg,'+cols.map((c,k)=>'rgb('+c[0]+','+c[1]+','+c[2]+') '+POS[k]+'%').join(',')+')';
+    const h=cols[3];
+    water.style.background='linear-gradient(180deg,rgb('+Math.round(h[0]*0.6)+','+Math.round(h[1]*0.6)+','+Math.round(h[2]*0.6)+') 0%,#34203F 42%,#150E26 100%)';
   }
   function enterFocus(){focusOn=true;document.body.classList.add('focus');document.body.classList.remove('hidehint');
-    fsize();initOrbs();ft0=null;if(!fraf)fraf=requestAnimationFrame(fdraw);
+    fStart=performance.now();applyDay(0);
+    if(fInt)clearInterval(fInt);fInt=setInterval(()=>applyDay(performance.now()-fStart),120);
     if(hintTimer)clearTimeout(hintTimer);hintTimer=setTimeout(()=>document.body.classList.add('hidehint'),3500);}
-  function exitFocus(){focusOn=false;document.body.classList.remove('focus');if(fraf){cancelAnimationFrame(fraf);fraf=null;}}
-  window.addEventListener('resize',()=>{if(focusOn){fsize();initOrbs();}});
+  function exitFocus(){focusOn=false;document.body.classList.remove('focus');
+    if(fInt){clearInterval(fInt);fInt=null;}
+    sky.style.background='';water.style.background='';}
   const gbtn=document.getElementById('glowbtn');
   gbtn.addEventListener('click',e=>{e.stopPropagation();focusOn?exitFocus():enterFocus();});
-  document.getElementById('focus').addEventListener('click',exitFocus);
+  document.querySelector('.scene').addEventListener('click',()=>{if(focusOn)exitFocus();});
 
   const moon=document.getElementById('moon');
   moon.addEventListener('click',e=>{e.stopPropagation();document.body.classList.add('dim');});
