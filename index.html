@@ -226,97 +226,43 @@
   let playing=false,type='brown';
   let timerId=null,timerEnd=0,tickId=null,fadeTimer=null;
 
-  /* ---------- audio: long seamless WAV loops played by a media element ----------
-     a media element with a real src is what makes Android surface working lock-screen
-     controls (play / pause / skip + title). 10-min loops keep the brief seam rare. */
-  const SR=44100, LOOP=600, XF=0.5, HB_BPM=66;   // 10-minute loops
+  /* ---------- audio: gapless playback via MSE ----------
+     Append a short Opus loop into ONE continuous timeline and evict behind the
+     playhead, so there is no per-loop re-seek and therefore no recurring seam.
+     It stays a real media element, so the Android lock-screen widget still works.
+     Where MSE/Opus is unavailable, fall back to a plain looping element. */
   const labels={brown:'Brown noise',pink:'Pink noise',white:'White noise',ocean:'Ocean',snoo:'SNOO',heartbeat:'Heartbeat',rain:'Rain',fan:'Fan'};
-  const FILES={rain:'rain.ogg',ocean:'ocean.ogg',heartbeat:'heart.ogg'};                  // real recording (its own 10-min loop)
-  const urls={};
-  const audioEl=new Audio(); audioEl.preload='auto'; audioEl.loop=true;
-  function thump(x,f0,f1,k,dec,amp){            // pitch-dropping enveloped low thud
-    if(x<0)return 0;
-    const env=amp*Math.exp(-x*dec)*(1-Math.exp(-x*340));
-    if(x>0.05&&env<0.0003)return 0;
-    const ph=6.2832*(f1*x+(f0-f1)*(1-Math.exp(-k*x))/k);
-    return Math.sin(ph)*env;
-  }
+  const SOUNDS={brown:'brown.webm',pink:'pink.webm',white:'white.webm',ocean:'ocean.webm',snoo:'snoo.webm',heartbeat:'heart.webm',rain:'rain.webm',fan:'fan.webm'};
+  const MIME='audio/webm; codecs="opus"';
+  const canMSE=(typeof MediaSource!=='undefined')&&(function(){try{return MediaSource.isTypeSupported(MIME);}catch(e){return false;}})();
+  const AHEAD=90, BEHIND=20;                 // seconds kept ahead of / behind the playhead
+  const audioEl=new Audio(); audioEl.preload='auto';
 
-  function genSamples(t,n){
-    const a=new Float32Array(n);
-    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0,lastBrown=0,lfo=0,lp=0,lp2=0,hum=0,gust=0;
-    const lfoInc=2*Math.PI*0.08/SR, humInc=2*Math.PI*120/SR, gustInc=2*Math.PI*0.1/SR;
-    const beatLen=SR*60/HB_BPM;
-    const NR=6, dA=new Float32Array(NR), dP=new Float32Array(NR), dI=new Float32Array(NR);
-    for(let i=0;i<n;i++){
-      const w=Math.random()*2-1; let s;
-      if(t==='white'){s=w*0.34;}
-      else if(t==='pink'){
-        b0=0.99886*b0+w*0.0555179;b1=0.99332*b1+w*0.0750759;
-        b2=0.96900*b2+w*0.1538520;b3=0.86650*b3+w*0.3104856;
-        b4=0.55000*b4+w*0.5329522;b5=-0.7616*b5-w*0.0168980;
-        s=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11;b6=w*0.115926;
-      }
-      else if(t==='brown'||t==='ocean'){
-        lastBrown=(lastBrown+0.02*w)/1.02;s=lastBrown*3.2;
-        if(t==='ocean'){lfo+=lfoInc;s*=(0.5+0.5*Math.sin(lfo));}
-      }
-      else if(t==='snoo'){            // SNOO-style strong womb rumble (deep + full)
-        lp=lp+0.045*(w-lp); lp2=lp2+0.18*(w-lp2);
-        s=(lp*3.2+lp2*0.6+w*0.12)*0.55;
-      }
-      else if(t==='rain'){           // wash + sizzle + random droplet plinks + gusts
-        b0=0.99886*b0+w*0.0555179;b1=0.99332*b1+w*0.0750759;
-        b2=0.96900*b2+w*0.1538520;b3=0.86650*b3+w*0.3104856;
-        b4=0.55000*b4+w*0.5329522;b5=-0.7616*b5-w*0.0168980;
-        const pink=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11;b6=w*0.115926;
-        lp=lp+0.45*(w-lp); const sizzle=w-lp;
-        if(Math.random()<0.0013){          // ~57 droplets/sec across the pool
-          let k=0,mn=dA[0]; for(let r=1;r<NR;r++)if(dA[r]<mn){mn=dA[r];k=r;}
-          dA[k]=0.5+Math.random()*0.5; dI[k]=2*Math.PI*(700+Math.random()*2600)/SR; dP[k]=0;
-        }
-        let drops=0;
-        for(let r=0;r<NR;r++){ if(dA[r]>0.0006){ drops+=(Math.sin(dP[r])*0.7+(Math.random()*2-1)*0.3)*dA[r]; dP[r]+=dI[r]; dA[r]*=0.9985; } }
-        gust+=gustInc;
-        s=(pink*0.72+sizzle*0.13+drops*0.34)*(0.85+0.15*Math.sin(gust));
-      }
-      else if(t==='fan'){            // mechanical fan: low rush + faint motor hum
-        lp=lp+0.08*(w-lp); hum+=humInc;
-        s=lp*1.7+Math.sin(hum)*0.04;
-      }
-      else if(t==='heartbeat'){      // dominant lub-dub thud over a faint deep hush
-        lastBrown=(lastBrown+0.02*w)/1.02; lp=lp+0.05*(lastBrown-lp);
-        const bed=lp*2.0;
-        const tb=(i-Math.floor(i/beatLen)*beatLen)/SR;
-        const beat=thump(tb,82,40,26,11,1.0)+thump(tb-0.17,62,33,26,13,0.74);
-        s=bed*0.12+beat*0.92;
-      }
-      else {s=w*0.2;}
-      a[i]=s;
-    }
-    return a;
+  const bufCache={};                         // type -> encoded loop (ArrayBuffer)
+  let ms=null, sb=null, srcType=null, token=0, ops=[], mseBroken=false;
+  function fetchBuf(t){ return bufCache[t]?Promise.resolve(bufCache[t]):fetch(SOUNDS[t]).then(function(r){return r.arrayBuffer();}).then(function(b){bufCache[t]=b;return b;}); }
+  function pump(){ if(!sb||sb.updating||!ops.length)return; var op=ops.shift(); try{op();}catch(e){ try{evict();}catch(_){} } }
+  function enqueue(op){ ops.push(op); pump(); }
+  function appendOne(){ var b=bufCache[srcType]; if(b&&sb)enqueue(function(){ sb.appendBuffer(b); }); }
+  function topUp(){ if(!sb||!srcType||!bufCache[srcType])return; var r=sb.buffered, end=r.length?r.end(r.length-1):0; if(end<(audioEl.currentTime||0)+AHEAD)appendOne(); }
+  function evict(){ if(!sb)return; var cur=audioEl.currentTime||0, safe=cur-BEHIND, r=sb.buffered; if(safe>1&&r.length&&r.start(0)<safe-1)enqueue(function(){ sb.remove(0,safe); }); }
+  function resetSource(){ token++; ops=[]; try{ if(ms&&ms.readyState==='open'&&ms.endOfStream)ms.endOfStream(); }catch(e){} ms=null; sb=null; srcType=null; }
+  function fallback(t,autoplay){ mseBroken=true; resetSource(); audioEl.loop=true; audioEl.src=SOUNDS[t]; if(autoplay){var p=audioEl.play();if(p&&p.catch)p.catch(function(){});} }
+  function buildMSE(t,autoplay){
+    resetSource(); var my=token; srcType=t;
+    ms=new MediaSource(); var url=URL.createObjectURL(ms); audioEl.loop=false; audioEl.src=url;
+    ms.addEventListener('sourceopen',function(){
+      if(my!==token)return; try{URL.revokeObjectURL(url);}catch(e){}
+      try{ sb=ms.addSourceBuffer(MIME); sb.mode='sequence'; }catch(e){ fallback(t,autoplay); return; }
+      sb.addEventListener('updateend',function(){ if(my!==token||!sb)return; pump(); if(!ops.length){ topUp(); evict(); } });
+      fetchBuf(t).then(function(){ if(my!==token)return; appendOne(); if(autoplay){var p=audioEl.play();if(p&&p.catch)p.catch(function(){});} }).catch(function(){ fallback(t,autoplay); });
+    },{once:true});
   }
-  function makeLoop(t){
-    const n=Math.floor(LOOP*SR),xf=Math.floor(XF*SR);
-    const raw=genSamples(t,n+xf),out=new Float32Array(n);
-    for(let i=0;i<n;i++)out[i]=raw[i];
-    for(let i=0;i<xf;i++){const p=i/xf;out[i]=raw[i]*Math.sin(p*Math.PI/2)+raw[n+i]*Math.cos(p*Math.PI/2);}
-    return out;
-  }
-  function encodeWAV(s){
-    const n=s.length,buf=new ArrayBuffer(44+n*2),v=new DataView(buf);
-    const w=(o,str)=>{for(let i=0;i<str.length;i++)v.setUint8(o+i,str.charCodeAt(i));};
-    w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);
-    v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,SR,true);v.setUint32(28,SR*2,true);
-    v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
-    let o=44;for(let i=0;i<n;i++){let x=s[i];x=x<-1?-1:x>1?1:x;v.setInt16(o,x<0?x*32768:x*32767,true);o+=2;}
-    return new Blob([buf],{type:'audio/wav'});
-  }
-  function urlFor(t){
-    if(FILES[t])return FILES[t];
-    if(!urls[t])urls[t]=URL.createObjectURL(encodeWAV(makeLoop(t)));
-    return urls[t];
-  }
+  function playType(t,autoplay){ if(canMSE&&!mseBroken)buildMSE(t,autoplay); else fallback(t,autoplay); }
+  audioEl.addEventListener('timeupdate',function(){ if(sb&&!sb.updating&&!ops.length){ topUp(); evict(); } });
+  audioEl.addEventListener('waiting',function(){ if(sb&&!sb.updating&&!ops.length)topUp(); });
+  setInterval(function(){ if(playing&&sb&&!sb.updating&&!ops.length){ topUp(); evict(); } },3000);
+  fetchBuf(type).catch(function(){});        // warm the default sound for an instant first play
 
   function setSession(state){
     if(!('mediaSession' in navigator))return;
@@ -328,8 +274,9 @@
   }
   function start(){
     if(fadeTimer){clearInterval(fadeTimer);fadeTimer=null;}
-    audioEl.src=urlFor(type); audioEl.loop=true; audioEl.volume=1;
-    const p=audioEl.play();if(p&&p.catch)p.catch(()=>{});
+    audioEl.volume=1;
+    if(canMSE&&!mseBroken&&ms&&srcType===type){ var p=audioEl.play(); if(p&&p.catch)p.catch(function(){}); }
+    else playType(type,true);
     playing=true;document.body.classList.add('playing');setSession('playing');
   }
   function stop(fade){
@@ -346,7 +293,7 @@
   function setType(t){
     type=t;
     document.querySelectorAll('.sound').forEach(x=>x.classList.toggle('active',x.dataset.type===t));
-    if(playing){ audioEl.src=urlFor(type); audioEl.loop=true; audioEl.volume=1; const p=audioEl.play(); if(p&&p.catch)p.catch(()=>{}); }
+    if(playing) playType(t,true);
     setSession(playing?'playing':'paused');
   }
   function skip(d){const i=ORDER.indexOf(type);setType(ORDER[(i+d+ORDER.length)%ORDER.length]);}

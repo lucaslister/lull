@@ -1,6 +1,7 @@
 # Lull — sound credits
 
-Brown, Pink, White, SNOO and Fan are generated procedurally in the browser (original).
+Brown, Pink, White, SNOO and Fan are original procedural recipes, pre-rendered to short
+seamless Opus loops (identical algorithms to the previous in-browser synthesis).
 
 Three sounds are real recordings used under open licences:
 
@@ -14,5 +15,5 @@ Three sounds are real recordings used under open licences:
 
 Rain and ocean were loudness-normalised and looped to ~10 minutes. The heartbeat was cut to a
 clean 3-beat loop, heavily low-pass filtered and warmed to sound muffled and womb-like (the way a
-baby hears it in utero rather than through a stethoscope), then mixed with a synthesised, beat-synced blood-flow "whoosh" bed (original) for a womb/soother feel, and looped to ~10 minutes.
+baby hears it in utero rather than through a stethoscope), then mixed with a synthesised, beat-synced blood-flow "whoosh" bed (original) for a womb/soother feel.
 If you swap any file, update this attribution accordingly.
